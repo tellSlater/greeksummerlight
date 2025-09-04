@@ -1,49 +1,24 @@
-# Greek Summer Light 🌞
+# Greek Summer Light — Pico W (CircuitPython)
 
-A **Raspberry Pi Pico W** project that simulates **Greek summer daylight** using an LED strip.  
-The LED brightness smoothly follows a sine wave, peaking at **13:00**, fading in at **06:00 (sunrise)**,  
-and fading out at **20:00 (sunset)** — based on **local time**, automatically adjusted for DST.
+Simulate **Greek summer daylight** on an LED using **Stockholm local time** for the clock.  
+Time syncs via **Adafruit NTP once per day**, then runs on **`time.monotonic()`** (no drift from sleeps). No HTTP/JSON.
 
----
+## Features
+- **Daily NTP sync** with `adafruit_ntp`; **offline** monotonic timing between syncs.
+- **No external time APIs** (no `adafruit_requests`, no worldtime services).
+- **Stockholm DST** handled locally (EU rule: last Sun in Mar 01:00 UTC → last Sun in Oct 01:00 UTC).
+- **Greek-summer profile**: smooth sine brightness from **06:00 → 20:30**, peak at midday; optional gamma.
+- **Resilient**: keeps running if NTP fails; retries later.
 
-## ✨ Features
-- 🌍 **Automatic Time Sync**  
-  Uses the [WorldClock API](http://worldclockapi.com) to fetch accurate **local time**.
-- 🕒 **DST-Aware**  
-  Automatically adjusts between **UTC+1** and **UTC+2**.
-- ☀️ **Greek Summer Profile**  
-  - Sunrise → **06:00**  
-  - Sunset → **20:00**  
-  - Peak brightness → **13:00**
-- 💡 **Smooth LED Brightness**  
-  Uses a sine curve for natural brightness transitions.
-- 🔄 **Watchdog Support** *(optional)*  
-  Resets the Pico if it freezes.
-- 📶 **Wi-Fi Connectivity**  
-  Auto-connects and keeps session alive.
-
----
-
-## 🛠 Hardware Requirements
+## Hardware
 - **Raspberry Pi Pico W**
-- LED strip (PWM controlled)
-- Resistor & transistor (if required for current handling)
-- Wi-Fi connection
+- LED driven from a PWM pin (default: `GP15`) with suitable transistor/resistor as needed.
 
----
+## Software / Libraries
+- **CircuitPython** (tested on 9.x)
+- Built-ins: `wifi`, `socketpool`, `time`, `math`, `pwmio`, `board`
+- One external lib in `/lib/`: **`adafruit_ntp.mpy`**
+  - _Not used anymore_: `adafruit_datetime`, `adafruit_requests`.
 
-## 📦 Software & Libraries
-- **CircuitPython** (Adafruit)
-- [`adafruit_requests`](https://docs.circuitpython.org/projects/requests/en/latest/)
-- `wifi`, `ssl`, `socketpool`
-- `pwmio`, `math`, `board`
+## Files & Layout
 
----
-
-## ⚙️ Setup
-1. Flash **CircuitPython** on your Pico W.
-2. Install the required libraries into `lib/` on your Pico.
-3. Edit the Wi-Fi credentials in `main.py`:
-   ```python
-   SSID = "your_wifi"
-   WPAKEY = "your_password"
