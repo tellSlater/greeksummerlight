@@ -1,3 +1,16 @@
+# ================= Wifi credentials =================
 CIRCUITPY_WIFI_SSID="YOUR_WIFI_NAME"
 CIRCUITPY_WIFI_PASSWORD="YOUR_WIFI_PASSWORD"
+
+# ================== Timezone index ==================
+# 0 = UTC
+# 1 = CET/CEST   — Stockholm, Berlin, Paris
+# 2 = WET/WEST   — Lisbon, London
+# 3 = EET/EEST   — Athens, Helsinki
+# 4 = MSK        — Moscow (no DST)
+# 5 = GMT        — Iceland (no DST)
+# 6 = TRT        — Turkey (no DST)
+# (Extend in code TZ_TABLE if you need more.)
+# ====================================================
+TIMEZONE = 1
 

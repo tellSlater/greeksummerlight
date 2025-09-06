@@ -1,7 +1,6 @@
-# main.py — NTP daily sync + monotonic; Stockholm time; Greek-summer light
+# main.py — NTP daily sync + monotonic; local time via TIMEZONE; Greek-summer light
 # Requires on CIRCUITPY/lib:
 #   adafruit_ntp.mpy
-
 
 import os
 import math
@@ -51,7 +50,6 @@ NTP_SERVER = "0.adafruit.pool.ntp.org"
 class TimeSync:
     """
     Keep UTC epoch seconds. Sync rarely via NTP, then advance using time.monotonic().
-    No adafruit_datetime usage (avoids time.gmtime).
     """
     def __init__(self, pool: socketpool.SocketPool):
         self.ntp = adafruit_ntp.NTP(pool, server=NTP_SERVER, tz_offset=0)  # UTC
@@ -60,8 +58,7 @@ class TimeSync:
         self._next_sync = 0.0
 
     def sync_now(self) -> None:
-        # NTP gives a UTC struct_time; convert to epoch using time.mktime.
-        # CircuitPython's time.mktime exists; there is no timezone concept, so it's fine.
+        # NTP returns UTC (struct_time). Convert to epoch.
         st = self.ntp.datetime  # time.struct_time in UTC
         self._utc_epoch = int(time.mktime(st))
         self._mono_ref = time.monotonic()
@@ -84,7 +81,7 @@ class TimeSync:
         return int(self._utc_epoch + (time.monotonic() - self._mono_ref))
 
 # -----------------------------
-# Stockholm (CET/CEST) DST math
+# Minimal date helpers
 # -----------------------------
 def _is_leap(y: int) -> bool:
     return (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
@@ -106,28 +103,58 @@ def _last_sunday_day(y: int, m: int) -> int:
     w = _weekday_sun0(y, m, last)  # 0=Sun
     return last - w  # go back w days to Sunday
 
-def stockholm_utc_offset_seconds_from_utc_struct(utc_st: time.struct_time) -> int:
+# -----------------------------
+# DST rules + Timezone table
+# -----------------------------
+def _eu_in_dst(utc_st: time.struct_time) -> bool:
     """
-    EU rule: DST from last Sunday in March 01:00 UTC to last Sunday in October 01:00 UTC.
-    CET = UTC+1 (winter), CEST = UTC+2 (summer).
+    EU DST: last Sunday in March 01:00 UTC (inclusive) to
+            last Sunday in October 01:00 UTC (exclusive).
     """
     y = utc_st.tm_year
     start_day = _last_sunday_day(y, 3)
     end_day   = _last_sunday_day(y, 10)
-
-    now = (utc_st.tm_mon, utc_st.tm_mday, utc_st.tm_hour, utc_st.tm_min, utc_st.tm_sec)
+    now   = (utc_st.tm_mon, utc_st.tm_mday, utc_st.tm_hour, utc_st.tm_min, utc_st.tm_sec)
     start = (3, start_day, 1, 0, 0)
     end   = (10, end_day, 1, 0, 0)
+    return (now >= start) and (now < end)
 
-    in_dst = (now >= start) and (now < end)
-    return 7200 if in_dst else 3600
+# TIMEZONE integer -> (base_offset_seconds, dst_rule, label)
+# Note: Keep it lean. Extend as you need.
+TZ_TABLE = {
+    0: (0,       None, "UTC"),
+    1: (3600,    "EU", "CET/CEST (Stockholm, Berlin, Paris)"),
+    2: (0,       "EU", "WET/WEST (Lisbon, London)"),
+    3: (7200,    "EU", "EET/EEST (Athens, Helsinki)"),
+    4: (10800,   None, "MSK (Moscow, no DST)"),
+    5: (0,       None, "GMT (Iceland, no DST)"),
+    6: (10800,   None, "TRT (Turkey, no DST)"),
+}
+
+def _get_tz_id_default() -> int:
+    tz_str = os.getenv("TIMEZONE")
+    if tz_str is None or tz_str.strip() == "":
+        return 1  # default CET/CEST
+    try:
+        return int(tz_str)
+    except ValueError:
+        return 1
+
+def tz_label(tz_id: int) -> str:
+    return TZ_TABLE.get(tz_id, TZ_TABLE[1])[2]
+
+def utc_offset_seconds_from_utc_struct(utc_st: time.struct_time, tz_id: int) -> int:
+    base_offset, dst_rule, _ = TZ_TABLE.get(tz_id, TZ_TABLE[1])
+    if dst_rule == "EU" and _eu_in_dst(utc_st):
+        return base_offset + 3600
+    return base_offset
 
 # -----------------------------
 # Greek-summer brightness curve
 # -----------------------------
-def greek_summer_brightness(local_st: time.struct_time) -> float:
+def summer_brightness(local_st: time.struct_time) -> float:
     """
-    Brighten as if Greece in summer, but keyed to Stockholm local clock.
+    Brighten like Greece in summer, keyed to *local* clock.
     Day window: 06:00–20:30, smooth sine peaking at midday.
     """
     seconds = local_st.tm_hour * 3600 + local_st.tm_min * 60 + local_st.tm_sec
@@ -144,9 +171,11 @@ def greek_summer_brightness(local_st: time.struct_time) -> float:
 # -----------------------------
 def main():
     pool = wifi_connect()
-
     ts = TimeSync(pool)
     ts.sync_now()
+
+    tz_id = _get_tz_id_default()
+    zone_name = tz_label(tz_id)
 
     last_print = 0.0
     while True:
@@ -155,20 +184,20 @@ def main():
         utc_epoch = ts.utc_now()
         utc_st = time.localtime(utc_epoch)  # treat as UTC struct_time
 
-        offset = stockholm_utc_offset_seconds_from_utc_struct(utc_st)
+        offset = utc_offset_seconds_from_utc_struct(utc_st, tz_id)
         local_st = time.localtime(utc_epoch + offset)
 
-        b = greek_summer_brightness(local_st)
+        b = summer_brightness(local_st)
         set_led_brightness(b)
 
         now = time.monotonic()
         if now - last_print >= 10:
             # ISO-like local timestamp
             print(
-                "%04d-%02d-%02dT%02d:%02d:%02d (Stockholm) | offset:%4ds | Brightness: %.3f" %
+                "%04d-%02d-%02dT%02d:%02d:%02d (%s) | offset:%4ds | Brightness: %.3f" %
                 (local_st.tm_year, local_st.tm_mon, local_st.tm_mday,
                  local_st.tm_hour, local_st.tm_min, local_st.tm_sec,
-                 offset, b)
+                 zone_name, offset, b)
             )
             last_print = now
 
